@@ -1,0 +1,18 @@
+export const STORAGE_KEYS = {
+  AUTH: 'imobigestao:auth:v2',
+  REAL_ESTATE: 'imobigestao:realestate:v1',
+  FINANCE: 'imobigestao:finance:v1',
+  OPS: 'imobigestao:ops:v1',
+  ADMIN: 'imobigestao:admin:v1',
+  PROPERTIES: 'imobigestao:properties:v1',
+  OWNERS: 'imobigestao:owners:v1',
+  TENANTS: 'imobigestao:tenants:v1',
+  LEASES: 'imobigestao:leases:v1',
+  INSTALLMENTS: 'imobigestao:installments:v1',
+  TRANSACTIONS: 'imobigestao:transactions:v1',
+  AUDIT_LOGS: 'imobigestao:audit_logs:v1',
+  INCIDENTS: 'imobigestao:incidents:v1',
+  INSPECTIONS: 'imobigestao:inspections:v1',
+  VENDORS: 'imobigestao:vendors:v1',
+  SYSTEM_USERS: 'imobigestao:system_users:v1',
+};

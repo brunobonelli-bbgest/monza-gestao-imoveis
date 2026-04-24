@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-petrol-50: #f0f9f9;
+  --color-petrol-100: #d9f0f0;
+  --color-petrol-200: #b3e1e1;
+  --color-petrol-300: #80caca;
+  --color-petrol-400: #4da6a6;
+  --color-petrol-500: #2a8585;
+  --color-petrol-600: #1f6666;
+  --color-petrol-700: #1a5252;
+  --color-petrol-800: #154242;
+  --color-petrol-900: #0a3d40;
+  --color-petrol-950: #052224;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-sm border border-white/20 shadow-sm;
+}
+
+.sidebar-item-active {
+  @apply bg-petrol-900 text-white shadow-md;
+}
+
+.sidebar-item-inactive {
+  @apply text-slate-500 hover:bg-slate-100 hover:text-slate-900;
+}
