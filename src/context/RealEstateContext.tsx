@@ -43,24 +43,66 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const adminContext = useContext(AdminContext);
   const auth = useContext(AuthContext);
 
-  // Load data from Supabase or LocalStorage
+  const normalizeOwner = (saved: any, original?: Owner): Owner => ({
+    ...(original || {}),
+    ...saved,
+    id: saved.id,
+    bankName: saved.bank_info?.bank_name ?? original?.bankName,
+    bankAgency: saved.bank_info?.agency ?? original?.bankAgency,
+    bankAccount: saved.bank_info?.account ?? original?.bankAccount,
+    pixKey: saved.bank_info?.pix_key ?? original?.pixKey,
+    personType: saved.bank_info?.person_type ?? original?.personType,
+    companyName: saved.bank_info?.company_name ?? original?.companyName,
+    stateRegistration: saved.bank_info?.state_registration ?? original?.stateRegistration,
+    reportPreference: saved.bank_info?.report_preference ?? original?.reportPreference ?? 'monthly',
+  }) as Owner;
+
+  const normalizeProperty = (saved: any, original?: Property): Property => ({
+    ...(original || {}),
+    ...saved,
+    id: saved.id,
+    ownerId: saved.owner_id ?? original?.ownerId,
+    rentValue: saved.rent_value ?? original?.rentValue,
+    isUnderMaintenance: saved.is_under_maintenance ?? original?.isUnderMaintenance ?? false,
+  }) as Property;
+
+  const normalizeLease = (saved: any, original?: Lease): Lease => ({
+    ...(original || {}),
+    ...saved,
+    id: saved.id,
+    propertyId: saved.property_id ?? original?.propertyId,
+    ownerId: saved.owner_id ?? original?.ownerId,
+    tenantId: saved.tenant_id ?? original?.tenantId,
+    contractNumber: saved.contract_number ?? original?.contractNumber,
+    startDate: saved.start_date ?? original?.startDate,
+    endDate: saved.end_date ?? original?.endDate,
+    rentValue: saved.rent_value ?? original?.rentValue,
+    managementFee: saved.management_fee ?? original?.managementFee,
+    dueDay: saved.due_day ?? original?.dueDay,
+    adjustmentIndex: saved.adjustment_index ?? original?.adjustmentIndex,
+    fees: {
+      condo: saved.condo_fee ?? original?.fees?.condo ?? 0,
+      tax: saved.tax_fee ?? original?.fees?.tax ?? 0,
+    },
+  }) as Lease;
+
   useEffect(() => {
     let isMounted = true;
 
     const loadData = async () => {
       if (!auth || auth.loading) return;
-      
+
       setLoading(true);
+
       try {
         if (auth.isAuthenticated && auth.user) {
-          // Fetching data from Supabase
           const [sOwners, sProperties, sTenants, sLeases] = await Promise.all([
-            supabaseDataService.getOwners().catch(e => { console.error('[RealEstate] Error fetching owners:', e); throw e; }),
-            supabaseDataService.getProperties().catch(e => { console.error('[RealEstate] Error fetching properties:', e); throw e; }),
-            supabaseDataService.getTenants().catch(e => { console.error('[RealEstate] Error fetching tenants:', e); throw e; }),
-            supabaseDataService.getLeases().catch(e => { console.error('[RealEstate] Error fetching leases:', e); throw e; })
+            supabaseDataService.getOwners(),
+            supabaseDataService.getProperties(),
+            supabaseDataService.getTenants(),
+            supabaseDataService.getLeases(),
           ]);
-          
+
           if (isMounted) {
             setOwners(sOwners);
             setProperties(sProperties);
@@ -68,8 +110,8 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
             setLeases(sLeases);
           }
         } else if (!auth.loading) {
-          // Use local storage if not authenticated
           const localData = realEstateStorage.get();
+
           if (isMounted) {
             setOwners(localData.owners);
             setProperties(localData.properties);
@@ -78,8 +120,8 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
           }
         }
       } catch (error) {
-        console.error('[RealEstateContext] Critical error loading data:', error);
-        // Fallback to local storage on error
+        console.error('[RealEstateContext] Erro ao carregar dados:', error);
+
         if (isMounted) {
           const localData = realEstateStorage.get();
           setOwners(localData.owners);
@@ -101,78 +143,70 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [auth?.isAuthenticated, auth?.loading, auth?.user?.id]);
 
-  // Save to LocalStorage as backup
   useEffect(() => {
     if (!loading) {
       realEstateStorage.save({ owners, properties, tenants, leases });
     }
   }, [owners, properties, tenants, leases, loading]);
 
-  // Business Rule: Expire leases if needed
   useEffect(() => {
     const { updatedLeases, changed } = expireLeasesIfNeeded(leases);
-    if (changed) {
-      setLeases(updatedLeases);
-    }
+    if (changed) setLeases(updatedLeases);
   }, [leases]);
 
-  // Business Rule: Sync property status with active leases
   useEffect(() => {
     setProperties(prev => {
       let changed = false;
+
       const next = prev.map(p => {
         const newStatus = computePropertyStatus(p, leases);
+
         if (newStatus !== p.status) {
           changed = true;
           return { ...p, status: newStatus };
         }
+
         return p;
       });
+
       return changed ? next : prev;
     });
   }, [leases]);
 
   const addOwner = useCallback(async (owner: Owner) => {
-    // Optimistic update
-    setOwners(prev => {
-      const exists = prev.some(o => o.id === owner.id);
-      return exists ? prev.map(o => o.id === owner.id ? owner : o) : [owner, ...prev];
-    });
-
     try {
       if (auth?.isAuthenticated) {
-        const saved = await supabaseDataService.saveOwner(owner);
-        if (saved && saved.id !== owner.id) {
-          const updatedOwner = { ...owner, id: saved.id };
-          setOwners(prev => prev.map(o => o.id === owner.id ? updatedOwner : o));
-          return updatedOwner;
-        }
-        return owner;
+        const saved = await supabaseDataService.saveOwner({ ...owner, id: '' } as Owner);
+        const normalizedOwner = normalizeOwner(saved, owner);
+
+        setOwners(prev => [normalizedOwner, ...prev]);
+        return normalizedOwner;
       }
+
+      setOwners(prev => [owner, ...prev]);
       return owner;
-    } catch (error) {
-      console.error('Error adding owner:', error);
+    } catch (error: any) {
+      alert('ERRO AO SALVAR PROPRIETÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao adicionar proprietário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
 
   const updateOwner = useCallback(async (owner: Owner) => {
-    // Optimistic update
-    setOwners(prev => prev.map(o => o.id === owner.id ? owner : o));
-
     try {
       if (auth?.isAuthenticated) {
         const saved = await supabaseDataService.saveOwner(owner);
-        if (saved && saved.id !== owner.id) {
-          const updatedOwner = { ...owner, id: saved.id };
-          setOwners(prev => prev.map(o => o.id === owner.id ? updatedOwner : o));
-          return updatedOwner;
-        }
-        return owner;
+        const normalizedOwner = normalizeOwner(saved, owner);
+
+        setOwners(prev => prev.map(o => o.id === owner.id ? normalizedOwner : o));
+        return normalizedOwner;
       }
+
+      setOwners(prev => prev.map(o => o.id === owner.id ? owner : o));
       return owner;
-    } catch (error) {
-      console.error('Error updating owner:', error);
+    } catch (error: any) {
+      alert('ERRO AO ATUALIZAR PROPRIETÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao atualizar proprietário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
@@ -180,71 +214,64 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const deleteOwner = useCallback(async (id: string) => {
     try {
       const ownerToDelete = owners.find(o => o.id === id);
+
       if (auth?.isAuthenticated) {
         await supabaseDataService.deleteOwner(id);
-        
-        // Audit Log
+
         if (adminContext?.addAuditLog && ownerToDelete) {
           const log = auditService.createLog('DELETE', 'owners', id, ownerToDelete, null, auth.user?.id);
           await adminContext.addAuditLog(log);
         }
       }
-      
-      // Update state only after success
+
       setOwners(prev => prev.filter(o => o.id !== id));
-    } catch (error) {
-      console.error('Error deleting owner:', error);
+    } catch (error: any) {
+      alert('ERRO AO EXCLUIR PROPRIETÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao excluir proprietário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, auth?.user?.id, owners, adminContext]);
 
   const addProperty = useCallback(async (property: Property) => {
-    const status = computePropertyStatus(property, leases);
-    const propertyWithStatus = { ...property, status };
-
-    // Optimistic update
-    setProperties(prev => {
-      const exists = prev.some(p => p.id === property.id);
-      return exists ? prev.map(p => p.id === property.id ? propertyWithStatus : p) : [propertyWithStatus, ...prev];
-    });
-
     try {
+      const status = computePropertyStatus(property, leases);
+      const propertyWithStatus = { ...property, status };
+
       if (auth?.isAuthenticated) {
-        const saved = await supabaseDataService.saveProperty(property);
-        if (saved && saved.id !== property.id) {
-          const updatedProperty = { ...propertyWithStatus, id: saved.id };
-          setProperties(prev => prev.map(p => p.id === property.id ? updatedProperty : p));
-          return updatedProperty;
-        }
-        return propertyWithStatus;
+        const saved = await supabaseDataService.saveProperty({ ...propertyWithStatus, id: '' } as Property);
+        const normalizedProperty = normalizeProperty(saved, propertyWithStatus);
+
+        setProperties(prev => [normalizedProperty, ...prev]);
+        return normalizedProperty;
       }
+
+      setProperties(prev => [propertyWithStatus, ...prev]);
       return propertyWithStatus;
-    } catch (error) {
-      console.error('Error adding property:', error);
+    } catch (error: any) {
+      alert('ERRO AO SALVAR IMÓVEL: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao adicionar imóvel:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, leases]);
 
   const updateProperty = useCallback(async (property: Property) => {
-    const status = computePropertyStatus(property, leases);
-    const propertyWithStatus = { ...property, status };
-
-    // Optimistic update
-    setProperties(prev => prev.map(p => p.id === property.id ? propertyWithStatus : p));
-
     try {
+      const status = computePropertyStatus(property, leases);
+      const propertyWithStatus = { ...property, status };
+
       if (auth?.isAuthenticated) {
-        const saved = await supabaseDataService.saveProperty(property);
-        if (saved && saved.id !== property.id) {
-          const updatedProperty = { ...propertyWithStatus, id: saved.id };
-          setProperties(prev => prev.map(p => p.id === property.id ? updatedProperty : p));
-          return updatedProperty;
-        }
-        return propertyWithStatus;
+        const saved = await supabaseDataService.saveProperty(propertyWithStatus);
+        const normalizedProperty = normalizeProperty(saved, propertyWithStatus);
+
+        setProperties(prev => prev.map(p => p.id === property.id ? normalizedProperty : p));
+        return normalizedProperty;
       }
+
+      setProperties(prev => prev.map(p => p.id === property.id ? propertyWithStatus : p));
       return propertyWithStatus;
-    } catch (error) {
-      console.error('Error updating property:', error);
+    } catch (error: any) {
+      alert('ERRO AO ATUALIZAR IMÓVEL: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao atualizar imóvel:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, leases]);
@@ -252,20 +279,20 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const deleteProperty = useCallback(async (id: string) => {
     try {
       const propertyToDelete = properties.find(p => p.id === id);
+
       if (auth?.isAuthenticated) {
         await supabaseDataService.deleteProperty(id);
 
-        // Audit Log
         if (adminContext?.addAuditLog && propertyToDelete) {
           const log = auditService.createLog('DELETE', 'properties', id, propertyToDelete, null, auth.user?.id);
           await adminContext.addAuditLog(log);
         }
       }
-      
-      // Update state only after success
+
       setProperties(prev => prev.filter(p => p.id !== id));
-    } catch (error) {
-      console.error('Error deleting property:', error);
+    } catch (error: any) {
+      alert('ERRO AO EXCLUIR IMÓVEL: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao excluir imóvel:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, auth?.user?.id, properties, adminContext]);
@@ -273,18 +300,17 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const addTenant = useCallback(async (tenant: Tenant) => {
     try {
       if (auth?.isAuthenticated) {
-        const saved = await supabaseDataService.saveTenant(tenant);
-        if (saved) {
-          setTenants(prev => {
-            const exists = prev.some(t => t.id === saved.id);
-            return exists ? prev.map(t => t.id === saved.id ? saved : t) : [saved, ...prev];
-          });
-          return saved;
-        }
+        const saved = await supabaseDataService.saveTenant({ ...tenant, id: '' } as Tenant);
+
+        setTenants(prev => [saved, ...prev]);
+        return saved;
       }
+
+      setTenants(prev => [tenant, ...prev]);
       return tenant;
-    } catch (error) {
-      console.error('Error adding tenant:', error);
+    } catch (error: any) {
+      alert('ERRO AO SALVAR LOCATÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao adicionar locatário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
@@ -293,14 +319,16 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
     try {
       if (auth?.isAuthenticated) {
         const saved = await supabaseDataService.saveTenant(tenant);
-        if (saved) {
-          setTenants(prev => prev.map(t => t.id === saved.id ? saved : t));
-          return saved;
-        }
+
+        setTenants(prev => prev.map(t => t.id === tenant.id ? saved : t));
+        return saved;
       }
+
+      setTenants(prev => prev.map(t => t.id === tenant.id ? tenant : t));
       return tenant;
-    } catch (error) {
-      console.error('Error updating tenant:', error);
+    } catch (error: any) {
+      alert('ERRO AO ATUALIZAR LOCATÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao atualizar locatário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
@@ -308,20 +336,20 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const deleteTenant = useCallback(async (id: string) => {
     try {
       const tenantToDelete = tenants.find(t => t.id === id);
+
       if (auth?.isAuthenticated) {
         await supabaseDataService.deleteTenant(id);
 
-        // Audit Log
         if (adminContext?.addAuditLog && tenantToDelete) {
           const log = auditService.createLog('DELETE', 'tenants', id, tenantToDelete, null, auth.user?.id);
           await adminContext.addAuditLog(log);
         }
       }
-      
-      // Update state only after success
+
       setTenants(prev => prev.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Error deleting tenant:', error);
+    } catch (error: any) {
+      alert('ERRO AO EXCLUIR LOCATÁRIO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao excluir locatário:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, auth?.user?.id, tenants, adminContext]);
@@ -329,39 +357,37 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const addLease = useCallback(async (lease: Lease) => {
     try {
       if (auth?.isAuthenticated) {
-        const saved = await supabaseDataService.saveLease(lease);
-        if (saved) {
-          setLeases(prev => {
-            const exists = prev.some(l => l.id === saved.id);
-            return exists ? prev.map(l => l.id === saved.id ? saved : l) : [saved, ...prev];
-          });
-          return saved;
-        }
+        const saved = await supabaseDataService.saveLease({ ...lease, id: '' } as Lease);
+        const normalizedLease = normalizeLease(saved, lease);
+
+        setLeases(prev => [normalizedLease, ...prev]);
+        return normalizedLease;
       }
+
+      setLeases(prev => [lease, ...prev]);
       return lease;
-    } catch (error) {
-      console.error('Error adding lease:', error);
+    } catch (error: any) {
+      alert('ERRO AO SALVAR CONTRATO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao adicionar contrato:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
 
   const updateLease = useCallback(async (lease: Lease) => {
-    // Optimistic update
-    setLeases(prev => prev.map(l => l.id === lease.id ? lease : l));
-
     try {
       if (auth?.isAuthenticated) {
         const saved = await supabaseDataService.saveLease(lease);
-        if (saved && saved.id !== lease.id) {
-          const updatedLease = { ...lease, id: saved.id };
-          setLeases(prev => prev.map(l => l.id === lease.id ? updatedLease : l));
-          return updatedLease;
-        }
-        return lease;
+        const normalizedLease = normalizeLease(saved, lease);
+
+        setLeases(prev => prev.map(l => l.id === lease.id ? normalizedLease : l));
+        return normalizedLease;
       }
+
+      setLeases(prev => prev.map(l => l.id === lease.id ? lease : l));
       return lease;
-    } catch (error) {
-      console.error('Error updating lease:', error);
+    } catch (error: any) {
+      alert('ERRO AO ATUALIZAR CONTRATO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao atualizar contrato:', error);
       throw error;
     }
   }, [auth?.isAuthenticated]);
@@ -369,20 +395,20 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   const deleteLease = useCallback(async (id: string) => {
     try {
       const leaseToDelete = leases.find(l => l.id === id);
+
       if (auth?.isAuthenticated) {
         await supabaseDataService.deleteLease(id);
 
-        // Audit Log
         if (adminContext?.addAuditLog && leaseToDelete) {
           const log = auditService.createLog('DELETE', 'leases', id, leaseToDelete, null, auth.user?.id);
           await adminContext.addAuditLog(log);
         }
       }
-      
-      // Update state only after success
+
       setLeases(prev => prev.filter(l => l.id !== id));
-    } catch (error) {
-      console.error('Error deleting lease:', error);
+    } catch (error: any) {
+      alert('ERRO AO EXCLUIR CONTRATO: ' + (error?.message || JSON.stringify(error)));
+      console.error('Erro ao excluir contrato:', error);
       throw error;
     }
   }, [auth?.isAuthenticated, auth?.user?.id, leases, adminContext]);
@@ -404,18 +430,54 @@ export const RealEstateProvider = ({ children }: { children: ReactNode }) => {
   }, [deleteLease]);
 
   const value = useMemo(() => ({
-    owners, properties, tenants, leases, loading,
-    addOwner, updateOwner, deleteOwner, deleteOwnerWithAudit,
-    addProperty, updateProperty, deleteProperty, deletePropertyWithAudit,
-    addTenant, updateTenant, deleteTenant, deleteTenantWithAudit,
-    addLease, updateLease, deleteLease, deleteLeaseWithAudit
+    owners,
+    properties,
+    tenants,
+    leases,
+    loading,
+    addOwner,
+    updateOwner,
+    deleteOwner,
+    deleteOwnerWithAudit,
+    addProperty,
+    updateProperty,
+    deleteProperty,
+    deletePropertyWithAudit,
+    addTenant,
+    updateTenant,
+    deleteTenant,
+    deleteTenantWithAudit,
+    addLease,
+    updateLease,
+    deleteLease,
+    deleteLeaseWithAudit,
   }), [
-    owners, properties, tenants, leases, loading,
-    addOwner, updateOwner, deleteOwner, deleteOwnerWithAudit,
-    addProperty, updateProperty, deleteProperty, deletePropertyWithAudit,
-    addTenant, updateTenant, deleteTenant, deleteTenantWithAudit,
-    addLease, updateLease, deleteLease, deleteLeaseWithAudit
+    owners,
+    properties,
+    tenants,
+    leases,
+    loading,
+    addOwner,
+    updateOwner,
+    deleteOwner,
+    deleteOwnerWithAudit,
+    addProperty,
+    updateProperty,
+    deleteProperty,
+    deletePropertyWithAudit,
+    addTenant,
+    updateTenant,
+    deleteTenant,
+    deleteTenantWithAudit,
+    addLease,
+    updateLease,
+    deleteLease,
+    deleteLeaseWithAudit,
   ]);
 
-  return <RealEstateContext.Provider value={value}>{children}</RealEstateContext.Provider>;
+  return (
+    <RealEstateContext.Provider value={value}>
+      {children}
+    </RealEstateContext.Provider>
+  );
 };
